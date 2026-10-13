@@ -5,61 +5,119 @@
 [![Tests](https://github.com/wilycode/translation/actions/workflows/tests.yml/badge.svg)](https://github.com/wilycode/translation/actions/workflows/tests.yml)
 [![Packagist](https://img.shields.io/packagist/v/wilycode/translation)](https://packagist.org/packages/wilycode/translation)
 
-**Lightweight translation and localization contracts for PHP 8.4+.** Define how your application translates messages, chooses plural forms, and formats regional data—without tying it to a framework or storage backend.
+**Framework-agnostic translation contracts and configuration-based locale formatting for PHP 8.4+.** Build translators, choose plural forms, and format dates, numbers, and money without coupling your application to a framework or translation storage backend.
 
-> **WilyCode PHP Ecosystem**
+> ### WilyCode PHP Ecosystem
 >
-> Part of **[WilyCode](https://github.com/wilycode/wilycode)**, a collection of independent, reusable PHP packages with their own repositories, versions, and Composer installations.
+> Part of **[WilyCode](https://github.com/wilycode/wilycode)** — independent, reusable PHP packages, each with its own repository, versioning, and Composer installation.
 >
-> **[Explore the WilyCode ecosystem →](https://github.com/wilycode/wilycode)**
+> **[Explore the WilyCode PHP Ecosystem →](https://github.com/wilycode/wilycode)**
 
 ## Table of contents
 
 - [Introduction](#introduction)
 - [Installation](#installation)
 - [Quick start](#quick-start)
-- [Translation](#translation)
-- [Pluralization](#pluralization)
-- [Message formatting](#message-formatting)
+- [Translation and pluralization](#translation-and-pluralization)
 - [Locale formatting](#locale-formatting)
+- [Locale resources and fallback](#locale-resources-and-fallback)
+- [Using only selected languages](#using-only-selected-languages)
+- [Message formatting](#message-formatting)
 - [API reference](#api-reference)
 - [Integrations](#integrations)
-- [Limitations & security](#limitations--security)
-- [Development & license](#development--license)
+- [Limitations and security](#limitations-and-security)
+- [Development and license](#development-and-license)
 
 ## Introduction
 
-`wilycode/translation` provides **three interfaces, one enum, and one helper**. It is the common foundation for translation implementations, not a translation engine by itself.
+`wilycode/translation` supplies reusable **contracts, a message formatting helper, and two concrete locale formatting classes**. It does not contain language definitions, translated messages, or regional configuration data.
 
 | Component | Purpose |
 | --- | --- |
-| `TranslatorInterface` | Retrieve messages and pluralized messages by resource and key. |
-| `LanguageInterface` | Identify a language and select its plural-form index. |
-| `LocaleFormatterInterface` | Format dates, date-times, money, and numbers. |
-| `DateStyle` | Choose `Short`, `Medium`, or `Long` date formatting. |
-| `MessageFormatter` | Substitute named `{placeholders}` in a message. |
+| `TranslatorInterface` | Retrieve translated and pluralized messages by resource and key. |
+| `LanguageInterface` | Determine a language's plural-form index for an integer count. |
+| `LocaleFormatterInterface` | Common contract for regional date, number, and currency formatting. |
+| `DateStyle` | `Short`, `Medium`, and `Long` date/time styles. |
+| `MessageFormatter` | Replace named placeholders such as `{name}`. |
+| `LocaleFormatter\LocaleFormatter` | **Concrete**, configurable date, number, and currency formatting. |
+| `LocaleFormatter\LocaleFormatterFactory` | Load a locale configuration file by code with a configurable fallback. |
 
-Translation catalogs, concrete language rules, and locale formatting implementations live in separate packages or in your application.
+`LocaleFormatter` and its factory are intentionally in the base package because they do not depend on any particular language. Ready-made language rules and regional resources live in [`wilycode/translation-languages`](https://github.com/wilycode/translation-languages), or you can supply your own.
 
 ## Installation
 
-**Requirements:** PHP 8.4 or newer. No framework, database, or third-party runtime package is required. The contracts themselves do not require `ext-intl`; particular implementations may.
+**Requirements:** PHP 8.4+. No framework, database, `ext-intl`, or other runtime dependency is required.
 
 ```bash
-composer require wilycode/translation
+composer require wilycode/translation:^0.1.1
 ```
 
-Install a concrete translator or formatter separately when your application needs one. This package does not provide ready-to-use translations.
+**Version 0.1.1 or newer is required for `LocaleFormatter` and `LocaleFormatterFactory`.** Version 0.1.0 provided only the contracts, `DateStyle`, and `MessageFormatter`.
+
+This install provides formatter code but **no locale configuration files**. Create your own resource files or copy only the ones you need from the separate languages repository.
 
 ## Quick start
 
-### Depend on the translator contract
+### Format a date and an amount
 
-Type-hint `TranslatorInterface` in application services. Supply a concrete implementation through your dependency injection configuration:
+`LocaleFormatter` accepts a plain PHP configuration array; it can be used without any other WilyCode package:
 
 ```php
 <?php
 
+require __DIR__ . '/vendor/autoload.php';
+
+use WilyCode\Translation\DateStyle;
+use WilyCode\Translation\LocaleFormatter\LocaleFormatter;
+
+$formatter = new LocaleFormatter([
+    'locale' => 'pl-PL',
+    'date' => [
+        'formats' => [
+            'short' => 'Y-m-d',
+            'medium' => 'd.m.Y',
+            'long' => 'j.m.Y',
+        ],
+    ],
+    'number' => [
+        'decimal_separator' => ',',
+        'thousands_separator' => ' ',
+        'currency' => 'PLN',
+        'fraction_digits' => 2,
+    ],
+]);
+
+$date = new DateTimeImmutable('2026-10-14');
+
+echo $formatter->formatDate($date);              // 14.10.2026
+echo $formatter->formatDate($date, DateStyle::Short); // 2026-10-14
+echo $formatter->formatMoney(1234.5);            // PLN 1 234,50
+```
+
+### Use a resource directory
+
+Instead of constructing arrays manually, create `resources/locales/pl-pl.php` that returns a configuration array, and let the factory load it:
+
+```php
+use WilyCode\Translation\LocaleFormatter\LocaleFormatterFactory;
+
+$factory = new LocaleFormatterFactory(
+    __DIR__ . '/resources/locales',
+    'pl-PL',
+);
+
+$formatter = $factory->forCode('pl-PL');
+```
+
+The directory and resource file must exist. To use prebuilt files, see [Using only selected languages](#using-only-selected-languages).
+
+## Translation and pluralization
+
+### Translate a message
+
+Use the `TranslatorInterface` contract in application services. Supply a concrete translator implementation separately through dependency injection:
+
+```php
 use WilyCode\Translation\TranslatorInterface;
 
 final readonly class WelcomeService
@@ -79,45 +137,9 @@ final readonly class WelcomeService
 }
 ```
 
-Here `messages` is a resource and `welcome` is a translation key. **Their meaning, translation lookup, and fallback behavior depend on the translator implementation.** The example defines a consumer, not a standalone translator.
+A translator implementation decides where to find messages, how to select a language, and how to handle missing keys. This example is a **consumer**, not a working translation backend.
 
-### Use the included helper immediately
-
-`MessageFormatter` works without a translation backend:
-
-```php
-<?php
-
-require __DIR__ . '/vendor/autoload.php';
-
-use WilyCode\Translation\MessageFormatter;
-
-$message = MessageFormatter::format(
-    'Hello, {name}! You have {count} messages.',
-    ['name' => 'Ada', 'count' => 3],
-);
-
-echo $message; // Hello, Ada! You have 3 messages.
-```
-
-## Translation
-
-`TranslatorInterface` has two methods: `translate()` and `translatePlural()`. They both return a string and accept named interpolation parameters.
-
-```php
-use WilyCode\Translation\TranslatorInterface;
-
-function pageTitle(TranslatorInterface $translator): string
-{
-    return $translator->translate('pages', 'home.title');
-}
-```
-
-The interface does not prescribe file structure, supported locales, current-language selection, missing-key behavior, or automatic placeholder replacement. An implementation makes those decisions.
-
-## Pluralization
-
-The translator selects pluralized messages via `translatePlural()`; a language implementation provides plural-form rules via `LanguageInterface`.
+### Translate plural forms
 
 ```php
 use WilyCode\Translation\TranslatorInterface;
@@ -133,160 +155,202 @@ function itemSummary(TranslatorInterface $translator, int $count): string
 }
 ```
 
-**Pass `count` as a parameter explicitly** if your message contains `{count}`. The interface does not add it automatically.
+Pass `{count}` as a parameter explicitly if the translated message uses it. `LanguageInterface` specifies `getCode()`, `getNumberOfPluralForms()`, and `getPluralForm(int $count)`; its zero-based plural indexes must correspond to the forms provided by the translator.
 
-`LanguageInterface` provides the language code, number of plural forms, and index for a given count. For example, an application-defined English rule could be:
+The base package does **not** ship any concrete language rules or message catalogs.
+
+## Locale formatting
+
+The concrete `LocaleFormatter` implements `LocaleFormatterInterface` and reads its behavior from a PHP array. It provides:
+
+| Operation | Example with Polish settings | Notes |
+| --- | --- | --- |
+| `formatDate($date)` | `14.10.2026` | `DateStyle::Medium` by default. |
+| `formatDate($date, DateStyle::Long)` | `14 października 2026 r.` | Requires a suitable long format and month-name map. |
+| `formatDateTime($dateTime)` | `14.10.2026 12:34:56` | Combines date and configured time pattern. |
+| `formatNumber(1234.5)` | `1 234,50` | Configurable separators and decimal places. |
+| `formatMoney(1234.5)` | `PLN 1 234,50` | Outputs currency code, then number. |
+| `getLocale()` | `pl-PL` | Locale identifier from configuration. |
+
+### Configuration structure
 
 ```php
-use WilyCode\Translation\LanguageInterface;
+<?php
 
-final class EnglishLanguage implements LanguageInterface
-{
-    public function getCode(): string { return 'en'; }
-
-    public function getNumberOfPluralForms(): int { return 2; }
-
-    public function getPluralForm(int $count): int
-    {
-        return $count === 1 ? 0 : 1;
-    }
-}
+return [
+    'locale' => 'en-US',
+    'date' => [
+        'formats' => [
+            'short' => 'Y-m-d',
+            'medium' => 'm/d/Y',
+            'long' => 'F j, Y',
+        ],
+        // Optional: 'long_month_case' => 'genitive' or 'nom',
+        // Optional: 'months_genitive' => [1 => '...', /* ... */],
+        // Optional: 'months_nominative' => [1 => '...', /* ... */],
+    ],
+    'time' => [
+        'formats' => ['short' => 'H:i', 'medium' => 'H:i:s', 'long' => 'H:i:s'],
+    ],
+    'number' => [
+        'decimal_separator' => '.',
+        'thousands_separator' => ',',
+        'currency' => 'USD',
+        'fraction_digits' => 2,
+        // Optional: 'grouping' => [3, 2], // Indian-style digit grouping.
+    ],
+];
 ```
 
-The index should be between `0` and `getNumberOfPluralForms() - 1`. **No concrete language definitions ship in this package.**
+`getDateFormat()` returns a **PHP `DateTime` pattern**, not an ICU/CLDR pattern. Long-date month substitution uses configured maps when available. Short and medium formats follow PHP formatting. The formatter uses PHP's `number_format()` for standard grouping and supports `[3, 2]` for Indian grouping.
+
+`DateStyle` is a string-backed enum: `Short = 'short'`, `Medium = 'medium'`, `Long = 'long'`. Missing settings use built-in defaults, rather than automatically selecting a regional locale.
+
+## Locale resources and fallback
+
+The factory takes a directory containing trusted PHP files such as `pl-pl.php`, `en-us.php`, and optional base-language aliases such as `pl.php`:
+
+```text
+resources/
+└── locales/
+    ├── pl-pl.php
+    ├── en-us.php
+    └── pl.php       # Optional alias: return require __DIR__ . '/pl-pl.php';
+```
+
+```php
+use WilyCode\Translation\LocaleFormatter\LocaleFormatterFactory;
+
+$factory = new LocaleFormatterFactory(__DIR__ . '/resources/locales', 'en-US');
+
+$pl = $factory->forCode('pl-PL');  // pl-pl.php
+$en = $factory->forCode('EN_us');  // en-us.php
+$fallback = $factory->forCode('xx'); // en-us.php
+```
+
+Lookup order: **exact normalized code**, **base-language alias**, then **configured default code**. Codes are case-insensitive; underscores are normalized to hyphens. Invalid codes, including path traversal strings, are treated as missing and fall back to the default. The factory throws `RuntimeException` if its directory is missing or no matching resource exists.
+
+The factory reads from exactly **one directory**; it does not merge local overrides with vendor resources. Alias files that use `require` need their referenced regional files alongside them.
+
+## Using only selected languages
+
+The [WilyCode Translation Languages repository](https://github.com/wilycode/translation-languages) contains ready-to-use language rules for 25 languages and configuration resources for 27 locales. **You do not have to install this entire package.**
+
+For a Polish-only application, keep `wilycode/translation` installed, and copy just these two files from that repository:
+
+| Source | Application destination | Purpose |
+| --- | --- | --- |
+| [`src/Language/Pl.php`](https://github.com/wilycode/translation-languages/blob/main/src/Language/Pl.php) | `app/Translation/Language/Pl.php` | Polish plural categories. |
+| [`src/resources/locales/pl-pl.php`](https://github.com/wilycode/translation-languages/blob/main/src/resources/locales/pl-pl.php) | `resources/locales/pl-pl.php` | Polish formatting configuration. |
+
+For the copied language class, change its namespace to `App\Translation\Language` and ensure Composer autoloads `App\` from `app/`. Keep its `use WilyCode\Translation\LanguageInterface;` unchanged. The regional resource file is a plain PHP array and does not need any namespace adjustment.
+
+```php
+use App\Translation\Language\Pl;
+use WilyCode\Translation\LocaleFormatter\LocaleFormatterFactory;
+
+$language = new Pl();
+$formatter = (new LocaleFormatterFactory(__DIR__ . '/resources/locales', 'pl-PL'))
+    ->forCode('pl-PL');
+
+$language->getPluralForm(2);            // 1
+$formatter->formatMoney(1234.5);       // PLN 1 234,50
+```
+
+**If you only format dates and numbers, skip `Pl.php`. If you only need plural categories, skip `pl-pl.php`.** No other language files are necessary. See the languages repository README for full selective-install instructions and an example of adding a new language.
 
 ## Message formatting
 
-`MessageFormatter::format()` replaces tokens such as `{name}` using literal string replacement; unknown tokens are preserved.
+The independent `MessageFormatter` helper replaces named placeholders with string values and preserves unknown placeholders:
 
 ```php
 use WilyCode\Translation\MessageFormatter;
 
-MessageFormatter::format('Order #{id}: {status}', [
-    'id' => 42,
-    'status' => 'ready',
-]); // 'Order #42: ready'
-
-MessageFormatter::format('Hello, {name}!', []);
-// 'Hello, {name}!'
+MessageFormatter::format('Hello, {name}!', ['name' => 'Ada']); // 'Hello, Ada!'
+MessageFormatter::format('Hello, {name}!', []); // 'Hello, {name}!'
 ```
 
-| Parameter value | Replacement |
+| Value | Replacement |
 | --- | --- |
-| `'Ada'` | `Ada` |
-| `42` or `1.5` | PHP string representation |
+| String, integer or float | Its string form. |
 | `true` | `1` |
-| `false` or `null` | Empty text (`''`) |
-| Missing parameter | Original `{placeholder}` stays unchanged |
+| `false`, `null` | Empty string. |
+| Missing parameter | Placeholder remains unchanged. |
 
-The helper accepts scalar or `null` values. It does **not** choose a translation, interpret ICU MessageFormat expressions, perform locale formatting, or escape HTML. A translator implementation may choose to use this helper, but the interface does not require it.
-
-## Locale formatting
-
-`LocaleFormatterInterface` abstracts regional display of dates, date-times, prices, and numbers. Inject an implementation rather than instantiating the interface:
-
-```php
-use WilyCode\Translation\DateStyle;
-use WilyCode\Translation\LocaleFormatterInterface;
-
-function invoiceSummary(
-    LocaleFormatterInterface $formatter,
-    DateTimeInterface $date,
-    float $amount,
-): string {
-    return $formatter->formatDate($date, DateStyle::Long)
-        . ' — '
-        . $formatter->formatMoney($amount, 'PLN', 2);
-}
-```
-
-Date styles are a string-backed enum:
-
-| Enum case | Value |
-| --- | --- |
-| `DateStyle::Short` | `short` |
-| `DateStyle::Medium` | `medium` |
-| `DateStyle::Long` | `long` |
-
-Each formatter determines its own date patterns, decimal separators, and currency presentation. `getDateFormat()` returns a PHP `DateTime` format pattern.
+This helper is not a translator, an ICU MessageFormat parser, or an HTML escaping function.
 
 ## API reference
 
-### TranslatorInterface
+### Translation contracts
+
+| Interface | Method | Returns |
+| --- | --- | --- |
+| `TranslatorInterface` | `translate(string $resource, string $key, array $parameters = [])` | `string` |
+| `TranslatorInterface` | `translatePlural(string $resource, string $key, int $count, array $parameters = [])` | `string` |
+| `LanguageInterface` | `getCode()` | `string` |
+| `LanguageInterface` | `getNumberOfPluralForms()` | `int` |
+| `LanguageInterface` | `getPluralForm(int $count)` | `int` |
+
+### Locale formatter
 
 | Method | Returns | Description |
 | --- | --- | --- |
-| `translate(string $resource, string $key, array $parameters = [])` | `string` | Translate a keyed message. |
-| `translatePlural(string $resource, string $key, int $count, array $parameters = [])` | `string` | Translate a keyed plural message. |
+| `LocaleFormatter::getLocale()` | `string` | Current locale identifier. |
+| `LocaleFormatter::getDateFormat(DateStyle $style = DateStyle::Medium)` | `string` | PHP date format. |
+| `LocaleFormatter::formatDate(DateTimeInterface $date, DateStyle $style = DateStyle::Medium)` | `string` | Formatted date. |
+| `LocaleFormatter::formatDateTime(DateTimeInterface $dateTime, DateStyle $style = DateStyle::Medium)` | `string` | Formatted date and time. |
+| `LocaleFormatter::formatNumber(float\|int $number, int $fractionDigits = 2)` | `string` | Formatted number. |
+| `LocaleFormatter::formatMoney(float\|int $amount, ?string $currency = null, ?int $fractionDigits = null)` | `string` | Formatted currency and amount. |
 
-Both parameter arrays are intended for `array<string, scalar|null>`.
+`LocaleFormatterInterface` defines these same six methods. Concrete `LocaleFormatter` accepts `array $config` in its constructor.
 
-### LanguageInterface
+### Resource factory and helpers
 
-| Method | Returns | Description |
-| --- | --- | --- |
-| `getCode()` | `string` | Language code, e.g. `en` or `pl`. |
-| `getNumberOfPluralForms()` | `int` | Number of plural forms. |
-| `getPluralForm(int $count)` | `int` | Plural index for the count. |
-
-### LocaleFormatterInterface
-
-| Method | Returns | Description |
-| --- | --- | --- |
-| `getLocale()` | `string` | Locale identifier, e.g. `en-US`. |
-| `getDateFormat(DateStyle $style = DateStyle::Medium)` | `string` | PHP date format pattern. |
-| `formatDate(DateTimeInterface $date, DateStyle $style = DateStyle::Medium)` | `string` | Localized date. |
-| `formatDateTime(DateTimeInterface $dateTime, DateStyle $style = DateStyle::Medium)` | `string` | Localized date and time. |
-| `formatMoney(float\|int $amount, ?string $currency = null, ?int $fractionDigits = null)` | `string` | Currency/amount formatting. |
-| `formatNumber(float\|int $number, int $fractionDigits = 2)` | `string` | Number formatting. |
-
-### Included helper and enum
-
-| Member | Returns | Description |
-| --- | --- | --- |
-| `MessageFormatter::format(string $message, array $parameters)` | `string` | Replace named placeholders. |
-| `DateStyle::Short`, `Medium`, `Long` | `DateStyle` | Date style enum cases. |
+| Member | Purpose |
+| --- | --- |
+| `new LocaleFormatterFactory(string $resourcesDir, string $defaultCode = 'en-US')` | Set resource directory and fallback code. |
+| `LocaleFormatterFactory::forCode(?string $code): LocaleFormatter` | Load the resource for the requested locale. |
+| `MessageFormatter::format(string $message, array $parameters)` | Replace message placeholders. |
+| `DateStyle::Short`, `Medium`, `Long` | Date formatting style enum cases. |
 
 ## Integrations
 
-The core package does not require any of these adapters. Install only those your application needs, when available:
-
 | Package | Purpose |
 | --- | --- |
-| [`wilycode/translation-array`](https://github.com/wilycode/translation-array) | Array-backed message translations. |
-| [`wilycode/translation-database`](https://github.com/wilycode/translation-database) | Database-backed message translations. |
-| [`wilycode/translation-languages`](https://github.com/wilycode/translation-languages) | Concrete language rules and locale formatters. |
+| [`wilycode/translation-languages`](https://github.com/wilycode/translation-languages) | Language pluralization rules and locale configuration data. |
+| [`wilycode/translation-array`](https://github.com/wilycode/translation-array) | Array-backed message translator (separate package). |
+| [`wilycode/translation-database`](https://github.com/wilycode/translation-database) | Database-backed message translator (separate package). |
 
 ```text
                        Application
                            |
                 WilyCode Translation
-          (interfaces + MessageFormatter)
-                  /        |        \
-       Array adapter   Database adapter   Languages/formatters
-             (optional implementations)
+            (contracts + formatters + helper)
+                     /           \\
+         Selective files      Full languages package
+            (optional)           (optional)
 ```
 
-Applications depend on `TranslatorInterface` and `LocaleFormatterInterface`, while individual adapters provide the implementations. This keeps storage and regional formatting separate from business logic.
+Install the full languages package if you want prebuilt definitions for many languages. Copy a selected class and locale file if you want a minimal application footprint. Neither approach automatically implements message lookup or user-language selection.
 
-## Limitations & security
+## Limitations and security
 
-- This package **does not** load translation catalogs, choose a locale, define fallback rules, or provide concrete translators and formatters.
-- `MessageFormatter` is literal substitution, **not HTML escaping**. Escape untrusted text for its output context before rendering.
-- Format currency and numbers with a locale formatter, not with the message helper.
-- Avoid exposing or logging translation strings or interpolation parameters when they contain sensitive data.
-- Missing-key and plural-catalog behavior depend on your installed translator implementation.
+- `LocaleFormatter` uses PHP date patterns and explicit configuration; **it is not a complete ICU/CLDR formatter** and does not handle language-specific digit shaping or currency exchange rates.
+- `formatMoney()` prefixes the ISO currency code (`PLN 1 234,50`), not a localized currency symbol or position.
+- `LocaleFormatterFactory` loads trusted **executable PHP configuration**. Do not point it at untrusted or writable-by-users directories.
+- Date pattern defaults and missing month maps may produce English month names. Copy suitable regional data for localized long dates.
+- Factory fallback is for **locale configuration**, not translation-message fallback. Neither translator catalogs nor `ext-intl` is included.
+- `MessageFormatter` does **not escape HTML**. Escape interpolated values for their output context before rendering.
+- Copying individual files means **you maintain updates to those copies**; Composer cannot update them on your behalf. Preserve the MIT license notice.
 
-## Development & license
+## Development and license
 
 ```bash
-composer install
 composer validate --strict
+composer install
 composer test
 ```
 
-PHPUnit runs on PHP 8.4 in [GitHub Actions](https://github.com/wilycode/translation/actions). Tests are retained in Git but excluded from distribution archives.
-
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) or open an [issue](https://github.com/wilycode/translation/issues).
+GitHub Actions runs PHPUnit on PHP 8.4. See [CONTRIBUTING.md](CONTRIBUTING.md) and [CHANGELOG.md](CHANGELOG.md).
 
 MIT © 2026 Simon Piter. See [LICENSE](LICENSE).

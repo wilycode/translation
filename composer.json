@@ -1,6 +1,6 @@
 {
     "name": "wilycode/translation",
-    "description": "Framework-agnostic translation, pluralization, and locale formatting contracts for PHP.",
+    "description": "Framework-agnostic translation contracts and configurable locale formatting for PHP.",
     "type": "library",
     "license": "MIT",
     "require": {
@@ -84,6 +84,6 @@
     "suggest": {
         "wilycode/translation-array": "Array-backed message translations.",
         "wilycode/translation-database": "Database-backed message translations.",
-        "wilycode/translation-languages": "Language definitions and locale formatting implementations."
+        "wilycode/translation-languages": "Ready-to-use language rules and locale data for 25 languages."
     }
 }
